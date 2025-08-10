@@ -21,34 +21,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Тут можна додати реальну логіку отримання ціни через API Binance
     await update.message.reply_text('Тут буде логіка ціни (приклад).')
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Логіка видачі сигналу (поки заглушка)
+    await update.message.reply_text('Тут буде логіка сигналів.')
+
+async def analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Логіка аналітики (поки заглушка)
+    await update.message.reply_text('Аналітика в розробці.')
+
+async def auto_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global auto_signal_enabled
+    auto_signal_enabled = not auto_signal_enabled
+    if auto_signal_enabled:
+        await update.message.reply_text('Автосигнал увімкнено.')
+    else:
+        await update.message.reply_text('Автосигнал вимкнено.')
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
 
     if text == 'старт':
-        await update.message.reply_text('Вітаю! Бот запущений і готовий до роботи.')
+        await start(update, context)
     elif text == 'автосигнал':
-        auto_signal_enabled = not auto_signal_enabled
-        if auto_signal_enabled:
-            await update.message.reply_text('Автосигнал увімкнено.')
-        else:
-            await update.message.reply_text('Автосигнал вимкнено.')
+        await auto_signal(update, context)
     elif text == 'сигнал':
-        await update.message.reply_text('Тут буде логіка сигналів.')
+        await signal(update, context)
     elif text == 'ціна':
-        await update.message.reply_text('Введи команду /price для отримання ціни.')
+        await price(update, context)
     elif text == 'аналітика':
-        await update.message.reply_text('Аналітика в розробці.')
+        await analytics(update, context)
     else:
-        await update.message.reply_text('Невідома команда. Використовуй кнопки.')
+        await update.message.reply_text('Невідома команда. Використовуй кнопки нижче.')
 
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('price', price))
+    app.add_handler(CommandHandler('signal', signal))
+    app.add_handler(CommandHandler('analytics', analytics))
+    app.add_handler(CommandHandler('autosignal', auto_signal))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler))
 
