@@ -1,234 +1,203 @@
 import os
 import asyncio
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters,
-    ContextTypes, ConversationHandler
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler
 )
 from binance.client import Client
 from dotenv import load_dotenv
-from datetime import datetime, timezone
 
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET')
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-# --- Глобальні змінні ---
-auto_signal_enabled = False
-auto_signal_task = None
-WATCHED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']  # монети які слідкуємо
-
-# --- Conversation states ---
-CHOOSE_PRICE, CHOOSE_SIGNAL, CHOOSE_ANALYTICS = range(3)
-
-# --- Клавіатури ---
-main_keyboard = [
-    ['Старт', 'Автосигнал'],
-    ['Ціна', 'Сигнал'],
-    ['Аналітика']
+COINS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
+    "SOLUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "LTCUSDT"
 ]
-main_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
 
-def get_symbols_keyboard():
-    keys = [[sym] for sym in WATCHED_SYMBOLS]
-    keys.append(['Всі монети'])
-    return ReplyKeyboardMarkup(keys, resize_keyboard=True, one_time_keyboard=True)
+CHOOSING_ACTION, CHOOSING_COIN = range(2)
 
-# --- Обробники ---
+auto_signal_enabled = False
+
+def get_main_menu():
+    keyboard = [['Ціна', 'Сигнал'], ['Аналітика', 'Автосигнал Вкл/Викл']]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привіт! Я крипто-бот.\nОбери команду або кнопку нижче:",
-        reply_markup=main_markup
+        "Привіт! Вибери команду:",
+        reply_markup=get_main_menu()
     )
+    return CHOOSING_ACTION
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_signal_enabled, auto_signal_task
-
+async def choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
 
-    if text == 'старт':
-        await update.message.reply_text("Бот запущений і готовий до роботи!", reply_markup=main_markup)
-
-    elif text == 'автосигнал':
-        auto_signal_enabled = not auto_signal_enabled
-        if auto_signal_enabled:
-            # Запускаємо таск автосигналу, якщо він не запущений
-            if auto_signal_task is None or auto_signal_task.done():
-                auto_signal_task = asyncio.create_task(run_auto_signal(update, context))
-            await update.message.reply_text("Автосигнал увімкнено.", reply_markup=main_markup)
-        else:
-            await update.message.reply_text("Автосигнал вимкнено.", reply_markup=main_markup)
-
-    elif text == 'ціна':
-        await update.message.reply_text(
-            "Обери монету для отримання ціни:",
-            reply_markup=get_symbols_keyboard()
-        )
-        return CHOOSE_PRICE
-
-    elif text == 'сигнал':
-        await update.message.reply_text(
-            "Обери монету для отримання сигналу:",
-            reply_markup=get_symbols_keyboard()
-        )
-        return CHOOSE_SIGNAL
-
-    elif text == 'аналітика':
-        await update.message.reply_text(
-            "Обери монету для аналітики:",
-            reply_markup=get_symbols_keyboard()
-        )
-        return CHOOSE_ANALYTICS
-
-    else:
-        await update.message.reply_text("Невідома команда. Використовуй кнопки.", reply_markup=main_markup)
-    return ConversationHandler.END
-
-# --- Логіка для команд з вибором монети ---
-
-async def get_price(symbol):
-    try:
-        if symbol == 'Всі монети':
-            prices = client.get_all_tickers()
-            res = '\n'.join([f"{p['symbol']}: {p['price']}" for p in prices if p['symbol'] in WATCHED_SYMBOLS])
-            return res or "Дані не знайдені."
-        else:
-            price = client.get_symbol_ticker(symbol=symbol)
-            return f"{symbol} ціна: {price['price']}"
-    except Exception as e:
-        return f"Помилка отримання ціни: {str(e)}"
-
-async def get_signal(symbol):
-    # Проста логіка: якщо ціна змінилась більше ніж на 1% за останні 24 год
-    try:
-        if symbol == 'Всі монети':
-            msgs = []
-            for sym in WATCHED_SYMBOLS:
-                change = client.get_ticker_24hr(symbol=sym)
-                price_change_percent = float(change['priceChangePercent'])
-                if abs(price_change_percent) >= 1:
-                    msgs.append(f"{sym}: зміна за 24г: {price_change_percent:.2f}%")
-            return '\n'.join(msgs) if msgs else "Сигналів немає."
-        else:
-            change = client.get_ticker_24hr(symbol=symbol)
-            price_change_percent = float(change['priceChangePercent'])
-            if abs(price_change_percent) >= 1:
-                return f"{symbol}: зміна за 24г: {price_change_percent:.2f}% - є сигнал!"
-            else:
-                return f"{symbol}: немає значних змін."
-    except Exception as e:
-        return f"Помилка отримання сигналів: {str(e)}"
-
-async def get_analytics(symbol):
-    # Приклад аналітики: поточна ціна + зміна за 1 год
-    try:
-        if symbol == 'Всі монети':
-            msgs = []
-            for sym in WATCHED_SYMBOLS:
-                ticker = client.get_ticker_24hr(symbol=sym)
-                price = client.get_symbol_ticker(symbol=sym)['price']
-                change_1h = await get_1h_change(sym)
-                msgs.append(f"{sym} ціна: {price}, зміна за 1 год: {change_1h:.2f}%")
-            return '\n'.join(msgs)
-        else:
-            price = client.get_symbol_ticker(symbol=symbol)['price']
-            change_1h = await get_1h_change(symbol)
-            return f"{symbol} ціна: {price}, зміна за 1 год: {change_1h:.2f}%"
-    except Exception as e:
-        return f"Помилка аналітики: {str(e)}"
-
-async def get_1h_change(symbol):
-    # Використаємо Klines (свічки) для обчислення зміни за останню годину
-    try:
-        klines = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1HOUR, limit=2)
-        if len(klines) < 2:
-            return 0.0
-        open_price = float(klines[0][1])
-        close_price = float(klines[1][4])
-        change = ((close_price - open_price) / open_price) * 100
-        return change
-    except:
-        return 0.0
-
-# Обробники вибору монети
-
-async def price_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = update.message.text.strip()
-    if symbol not in WATCHED_SYMBOLS and symbol != 'Всі монети':
-        await update.message.reply_text("Монету не знайдено, спробуй ще.", reply_markup=get_symbols_keyboard())
-        return CHOOSE_PRICE
-
-    res = await get_price(symbol)
-    await update.message.reply_text(res, reply_markup=main_markup)
-    return ConversationHandler.END
-
-async def signal_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = update.message.text.strip()
-    if symbol not in WATCHED_SYMBOLS and symbol != 'Всі монети':
-        await update.message.reply_text("Монету не знайдено, спробуй ще.", reply_markup=get_symbols_keyboard())
-        return CHOOSE_SIGNAL
-
-    res = await get_signal(symbol)
-    await update.message.reply_text(res, reply_markup=main_markup)
-    return ConversationHandler.END
-
-async def analytics_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = update.message.text.strip()
-    if symbol not in WATCHED_SYMBOLS and symbol != 'Всі монети':
-        await update.message.reply_text("Монету не знайдено, спробуй ще.", reply_markup=get_symbols_keyboard())
-        return CHOOSE_ANALYTICS
-
-    res = await get_analytics(symbol)
-    await update.message.reply_text(res, reply_markup=main_markup)
-    return ConversationHandler.END
-
-# --- Автосигнал (фонова задача) ---
-
-async def run_auto_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global auto_signal_enabled
 
-    chat_id = update.effective_chat.id
-    while auto_signal_enabled:
+    if text in ['ціна', 'сигнал', 'аналітика']:
+        context.user_data['action'] = text
+        coins_buttons = [[coin[:-4]] for coin in COINS]
+        coins_buttons.append(['Всі монети'])
+        reply_markup = ReplyKeyboardMarkup(coins_buttons, resize_keyboard=True)
+        await update.message.reply_text(
+            f"Обери монету для {text}:",
+            reply_markup=reply_markup
+        )
+        return CHOOSING_COIN
+    elif text == 'автосигнал вкл/викл':
+        auto_signal_enabled = not auto_signal_enabled
+        state = "увімкнено" if auto_signal_enabled else "вимкнено"
+        await update.message.reply_text(f"Автосигнал {state}.", reply_markup=get_main_menu())
+        return CHOOSING_ACTION
+    else:
+        await update.message.reply_text(
+            "Невідома команда, будь ласка, обери зі списку.",
+            reply_markup=get_main_menu()
+        )
+        return CHOOSING_ACTION
+
+async def handle_coin_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    coin_choice = update.message.text.upper()
+    action = context.user_data.get('action')
+
+    if coin_choice == 'ВСІ МОНЕТИ':
+        coins_to_check = COINS
+    else:
+        coin_full = coin_choice + "USDT"
+        if coin_full not in COINS:
+            await update.message.reply_text(
+                "Невідома монета, будь ласка, обери зі списку.",
+                reply_markup=get_main_menu()
+            )
+            return CHOOSING_COIN
+        coins_to_check = [coin_full]
+
+    if action == 'ціна':
+        await show_price(update, coins_to_check)
+    elif action == 'сигнал':
+        await show_signal(update, coins_to_check)
+    elif action == 'аналітика':
+        await show_analytics(update, coins_to_check)
+    else:
+        await update.message.reply_text(
+            "Сталася помилка. Спробуйте знову.",
+            reply_markup=get_main_menu()
+        )
+    # Після відповіді повертаємось в головне меню
+    await update.message.reply_text("Оберіть команду:", reply_markup=get_main_menu())
+    return CHOOSING_ACTION
+
+async def show_price(update: Update, coins):
+    texts = []
+    for coin in coins:
         try:
-            msg = await get_signal('Всі монети')
-            if msg != "Сигналів немає.":
-                now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-                await context.bot.send_message(chat_id=chat_id, text=f"[Автосигнал {now}]\n{msg}")
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"Помилка автосигналу: {str(e)}")
+            ticker = client.get_symbol_ticker(symbol=coin)
+            price = ticker['price']
+            texts.append(f"{coin[:-4]}: {price} USD")
+        except Exception:
+            texts.append(f"{coin[:-4]}: помилка отримання ціни")
+    await update.message.reply_text("\n".join(texts), reply_markup=ReplyKeyboardRemove())
 
-        await asyncio.sleep(60*5)  # перевіряємо кожні 5 хвилин
+async def show_signal(update: Update, coins):
+    texts = []
+    for coin in coins:
+        try:
+            klines = client.get_klines(symbol=coin, interval=Client.KLINE_INTERVAL_1HOUR, limit=2)
+            if len(klines) < 2:
+                texts.append(f"{coin[:-4]}: недостатньо даних для сигналу")
+                continue
+            prev_close = float(klines[-2][4])
+            last_close = float(klines[-1][4])
+            if last_close > prev_close:
+                signal = "📈 Рекомендовано КУПИТИ"
+            elif last_close < prev_close:
+                signal = "📉 Рекомендовано ПРОДАТИ"
+            else:
+                signal = "➖ Без змін"
+            texts.append(f"{coin[:-4]}: {signal} (ост. ціна: {last_close} USD)")
+        except Exception:
+            texts.append(f"{coin[:-4]}: помилка отримання сигналу")
+    await update.message.reply_text("\n".join(texts), reply_markup=ReplyKeyboardRemove())
 
-# --- Головна функція ---
+async def show_analytics(update: Update, coins):
+    texts = []
+    for coin in coins:
+        try:
+            ticker_24h = client.get_ticker_24hr(symbol=coin)
+            price_change = float(ticker_24h.get('priceChangePercent', 0))
+            high_price = float(ticker_24h.get('highPrice', 0))
+            low_price = float(ticker_24h.get('lowPrice', 0))
+            texts.append(
+                f"{coin[:-4]}:\n"
+                f"Зміна за 24г: {price_change:.2f}%\n"
+                f"Макс. ціна: {high_price} USD\n"
+                f"Мін. ціна: {low_price} USD"
+            )
+        except Exception:
+            texts.append(f"{coin[:-4]}: помилка отримання аналітики")
+    await update.message.reply_text("\n\n".join(texts), reply_markup=ReplyKeyboardRemove())
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Скасовано.", reply_markup=main_markup)
-    return ConversationHandler.END
+async def auto_signal_task(application):
+    global auto_signal_enabled
+    while True:
+        if auto_signal_enabled:
+            try:
+                texts = []
+                for coin in COINS:
+                    klines = client.get_klines(symbol=coin, interval=Client.KLINE_INTERVAL_15MINUTE, limit=2)
+                    if len(klines) < 2:
+                        continue
+                    prev_close = float(klines[-2][4])
+                    last_close = float(klines[-1][4])
+                    if last_close > prev_close:
+                        signal = "📈 Рекомендовано КУПИТИ"
+                    elif last_close < prev_close:
+                        signal = "📉 Рекомендовано ПРОДАТИ"
+                    else:
+                        signal = None
+                    if signal:
+                        texts.append(f"{coin[:-4]}: {signal} (ост. ціна: {last_close} USD)")
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+                if texts:
+                    msg = "[Автосигнал {}]\n\n".format(datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")) + "\n".join(texts)
+                    for chat_id in application.chat_data.keys():
+                        await application.bot.send_message(chat_id=chat_id, text=msg)
+
+            except Exception as e:
+                print(f"Помилка автосигналу: {e}")
+
+        await asyncio.sleep(900)  # 15 хвилин
+
+async def main():
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler)],
+        entry_points=[CommandHandler('start', start)],
         states={
-            CHOOSE_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, price_choice)],
-            CHOOSE_SIGNAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, signal_choice)],
-            CHOOSE_ANALYTICS: [MessageHandler(filters.TEXT & ~filters.COMMAND, analytics_choice)],
+            CHOOSING_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_coin)],
+            CHOOSING_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coin_choice)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
-        allow_reentry=True,
+        fallbacks=[],
+        allow_reentry=True
     )
+    application.add_handler(conv_handler)
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv_handler)
+    # Запуск автосигналу як фонове завдання
+    application.job_queue.run_repeating(lambda ctx: asyncio.create_task(auto_signal_task(application)), interval=900, first=10)
 
     print("Бот запущений...")
-    app.run_polling()
+    await application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    import nest_asyncio
+    nest_asyncio.apply()  # Щоб уникнути RuntimeError в Windows
+    import asyncio
+    asyncio.run(main())
