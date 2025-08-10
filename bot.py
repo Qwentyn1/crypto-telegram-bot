@@ -1,5 +1,6 @@
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
 
 TELEGRAM_BOT_TOKEN = '8110685774:AAGtRE2qYsid1MIA3SD0K_8itCLe1QEMHuo'
 BINANCE_API_KEY = 'VpqwF6TywazIQKwwFBqNb3K8AOblqp9DGT6kQAuTHiAjRiJ7o9R0iqHoIlqVUNM3'
@@ -43,7 +44,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text('Невідома команда. Використовуй кнопки.')
 
-def main():
+async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
@@ -52,7 +53,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler))
 
     print("Бот запущений...")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
