@@ -1,10 +1,14 @@
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import asyncio
+import os
+from dotenv import load_dotenv
 
-TELEGRAM_BOT_TOKEN = '8110685774:AAGtRE2qYsid1MIA3SD0K_8itCLe1QEMHuo'
-BINANCE_API_KEY = 'VpqwF6TywazIQKwwFBqNb3K8AOblqp9DGT6kQAuTHiAjRiJ7o9R0iqHoIlqVUNM3'
-BINANCE_API_SECRET = 'V9ZRbX44Dr66UkEWwqJNG9afuhDknpAGeatnekaNbhwIyj1KIouFZGayyImfxves'
+load_dotenv()  # Зчитує змінні з .env
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET')
 
 auto_signal_enabled = False
 
@@ -21,49 +25,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Тут можна додати реальну логіку отримання ціни через API Binance
     await update.message.reply_text('Тут буде логіка ціни (приклад).')
 
-async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Логіка видачі сигналу (поки заглушка)
-    await update.message.reply_text('Тут буде логіка сигналів.')
-
-async def analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Логіка аналітики (поки заглушка)
-    await update.message.reply_text('Аналітика в розробці.')
-
-async def auto_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_signal_enabled
-    auto_signal_enabled = not auto_signal_enabled
-    if auto_signal_enabled:
-        await update.message.reply_text('Автосигнал увімкнено.')
-    else:
-        await update.message.reply_text('Автосигнал вимкнено.')
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global auto_signal_enabled
     text = update.message.text.lower()
 
     if text == 'старт':
-        await start(update, context)
+        await update.message.reply_text('Вітаю! Бот запущений і готовий до роботи.')
     elif text == 'автосигнал':
-        await auto_signal(update, context)
+        auto_signal_enabled = not auto_signal_enabled
+        if auto_signal_enabled:
+            await update.message.reply_text('Автосигнал увімкнено.')
+        else:
+            await update.message.reply_text('Автосигнал вимкнено.')
     elif text == 'сигнал':
-        await signal(update, context)
+        await update.message.reply_text('Тут буде логіка сигналів.')
     elif text == 'ціна':
-        await price(update, context)
+        await update.message.reply_text('Введи команду /price для отримання ціни.')
     elif text == 'аналітика':
-        await analytics(update, context)
+        await update.message.reply_text('Аналітика в розробці.')
     else:
-        await update.message.reply_text('Невідома команда. Використовуй кнопки нижче.')
+        await update.message.reply_text('Невідома команда. Використовуй кнопки.')
 
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('price', price))
-    app.add_handler(CommandHandler('signal', signal))
-    app.add_handler(CommandHandler('analytics', analytics))
-    app.add_handler(CommandHandler('autosignal', auto_signal))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler))
 
